@@ -1,4 +1,4 @@
-# RearAware
+# RearAware Chrome Extension (Beta)
 
 Because your cat has no sense of professional boundaries.
 
@@ -6,7 +6,7 @@ RearAware is a real time AI webcam filter that detects and censors cat butts dur
 
 Built for Google Meet and Microsoft Teams.
 
-![RearAware demo](./assets/demo.gif)
+![RearAware demo](rearaware-chrome-nobodyasked.jpg)
 
 ## Features
 
@@ -18,11 +18,9 @@ Built for Google Meet and Microsoft Teams.
 
 ## Installation
 
-**From the Chrome Web Store** (once published):
+**From the Chrome Web Store** (coming soon!)
 
-[Coming soon]
-
-**Manual install (for now / for developers):**
+**Manual install:**
 
 1. Download or clone this repo.
 2. Install dependencies:
