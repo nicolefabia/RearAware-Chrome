@@ -50,7 +50,7 @@ Toggle it off, or mute the sound effects, from the extension popup at any time.
 - Works best with good lighting and a clear view of the cat.
 - The model was trained on cats only, not dogs, humans, or anything else.
 - Sound effects are random. You're welcome.
-- Detection isn't perfect — it may occasionally miss a butt at an odd angle, or very rarely censor something that isn't one. It's a fun tool, not a guarantee.
+- Detection isn't perfect. It may occasionally miss a butt at an odd angle, or very rarely censor something that isn't one. It's a fun tool, not a guarantee.
 - Requires a browser with WebGPU support (recent versions of Chrome) for full speed; falls back to a slower CPU-only mode otherwise.
 
 ## How it works (for the curious)
@@ -59,3 +59,6 @@ Toggle it off, or mute the sound effects, from the extension popup at any time.
 - Inference runs client-side using [onnxruntime-web](https://github.com/microsoft/onnxruntime), using the WebGPU execution provider when available.
 - A content script captures webcam frames from the call's video element, runs detection, and overlays a censor sticker positioned and scaled to match the detected region — including correcting for Meet's mirrored self-view.
 
+**Dedicated to Wolfe Shah 🩶**
+
+⚠️ Early beta ⚠️ This is a hobby project, not a polished product. Detection isn't perfect: it may occasionally miss a butt, or censor something that isn't one. Expect bugs, and expect it to get better over time!
