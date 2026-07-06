@@ -18,7 +18,7 @@ export async function loadModel() {
 
             console.log("🐈 Loading RearAware model (WebGPU)...");
 
-            const ort = await import("onnxruntime-web/webgpu");
+            const ort = await import("onnxruntime-web/wasm");
 
             session = await ort.InferenceSession.create(
                 chrome.runtime.getURL("models/30-cfb.onnx"), // FP32 model - quantized INT8 ops may not have WebGPU kernels yet
