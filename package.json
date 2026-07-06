@@ -1,0 +1,17 @@
+{
+  "name": "rearaware-chrome",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.22.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.7.1",
+    "vite": "^7.1.3"
+  }
+}
