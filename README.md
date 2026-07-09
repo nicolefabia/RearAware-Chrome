@@ -2,9 +2,9 @@
 
 Because your cat has no sense of professional boundaries.
 
-RearAware is a real time AI webcam filter that detects and censors cat butts during video calls. Powered by a custom trained YOLO model running fully on-device via WebGPU, it identifies feline rear ends in real time and automatically covers them with a CENSORED sticker. No video ever leaves your computer.
+RearAware is a real time AI webcam filter that detects and censors cat butts during video calls. Powered by a custom-trained YOLO model running entirely on-device via ONNX Runtime and WebGPU. It identifies feline rear ends in real time and automatically covers them with a CENSORED sticker. No video ever leaves your computer.
 
-Built for Google Meet and Microsoft Teams.
+Currently supports Google Meet. Microsoft Teams support is in progress.
 
 ![RearAware demo](rearaware-chrome-nobodyasked.jpg)
 
@@ -18,12 +18,16 @@ Built for Google Meet and Microsoft Teams.
 
 ## Installation
 
-**From the Chrome Web Store** (coming soon!)
+**Chrome Web Store:**
 
-**Manual install:**
+https://chromewebstore.google.com/detail/bhehiighjgekghjjmdhjkloflobanmad?utm_source=item-share-cb
+
+**Manual install (for developers):**
+
+Requires Node.js installed
 
 1. Download or clone this repo.
-2. Install dependencies:
+2. Open a terminal in the project folder and install dependencies:
    ```bash
    npm install
    ```
@@ -37,8 +41,8 @@ Built for Google Meet and Microsoft Teams.
 
 ## Using it in a meeting
 
-1. Make sure RearAware is enabled (click the extension icon to check).
-2. Join a call on **Google Meet** or **Microsoft Teams**.
+1. Make sure RearAware is enabled.
+2. Join a video call on **Google Meet**.
 3. That's it :) your cat's dignity is now protected.
 
 Toggle it off, or mute the sound effects, from the extension popup at any time.
@@ -48,12 +52,12 @@ Toggle it off, or mute the sound effects, from the extension popup at any time.
 - Works best with good lighting and a clear view of the cat.
 - The model was trained on cats only, not dogs, humans, or anything else.
 - Sound effects are random. You're welcome.
-- Detection isn't perfect. It may occasionally miss a butt at an odd angle, or very rarely censor something that isn't one. It's a fun tool, not a guarantee.
+- Detection isn't perfect yet. It may occasionally miss a butt, or very rarely censor something that isn't one. It's a fun tool, not a guarantee.
 - Requires a browser with WebGPU support (recent versions of Chrome) for full speed; falls back to a slower CPU-only mode otherwise.
 
-## How it works (for the curious)
+## How it works
 
-- A YOLO model (trained via Ultralytics, exported to ONNX) detects three classes: cat, face, and butt.
+- A custom YOLO model (trained with Ultralytics and exported to ONNX) detects three classes: cat, face and butt.
 - Inference runs client-side using [onnxruntime-web](https://github.com/microsoft/onnxruntime), using the WebGPU execution provider when available.
 - A content script captures webcam frames from the call's video element, runs detection, and overlays a censor sticker positioned and scaled to match the detected region — including correcting for Meet's mirrored self-view.
 
