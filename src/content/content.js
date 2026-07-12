@@ -1,22 +1,26 @@
 console.log("🐈 RearAware loaded!");
 
 const MODEL_SIZE = 320;         // model expects [1, 3, 320, 320]
-const SCORE_THRESHOLD = 0.28;   // minimum confidence to show the sticker
+let scoreThreshold = 0.22;   // minimum confidence to show the sticker - adjustable live via the popup slider
 const DETECT_INTERVAL_MS = 0; // no artificial floor - just run again as soon as the previous detection finishes
 
 let ort = null; // filled in once startDetectionLoop() knows which backend (webgpu/wasm) detector.js actually loaded
 
 let enabled = true;
 let mute = false;
+let debug = false;
+let obfuscationMode = "standard"; // "standard" | "all-seeing" | "nicolas-cage" - which sticker to draw
 
 let video = null;
 let sticker = null;
+let debugBoxes = null; // { cat, face, butt } DOM elements, created lazily
 let session = null;
 
 let canvas = null;
 let ctx = null;
 
-let latestDetection = null; // { x1, y1, x2, y2, score } in raw video pixel space, or null
+let latestDetection = null; // { x1, y1, x2, y2, score } in raw video pixel space, or null - the butt box, used for the sticker
+let latestDetections = [null, null, null]; // [cat, face, butt] in raw video pixel space, or null each - used for debug view
 let lastDetectionTime = 0;  // performance.now() timestamp of the last successful detection
 let debugFrameCount = 0;    // throttles the confidence-score debug logging below
 let wasDetected = false;    // tracks previous tick's state, so a sound fires once per newly-appeared detection
@@ -25,7 +29,7 @@ let detectTimer = null;
 let detectionActive = false; // set false to stop the self-rescheduling detection loop
 let rafId = null;
 
-let stickerAspect = 1; // width / height of censored.png, filled in once it loads
+let stickerAspect = 1; // width / height of the active sticker media, filled in once it loads
 let smoothedBox = null; // { cx, cy, height } in screen px - eased toward the latest detection each frame
 
 const SOUND_COOLDOWN_MS = 3000; // mirrors sound_cooldown in rearaware.py
@@ -61,21 +65,39 @@ function playRandomSound() {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
+// Uses chrome.storage.local, matching popup.js's key names exactly (Detection
+// on/off, Sound, Bounding boxes debug, Confidence threshold, Obfuscation type).
+// "confidence" arrives as a 0-100 percentage from the popup slider and is
+// converted to the 0-1 range this file's scoreThreshold expects.
 
-chrome.storage.sync.get({ enabled: true, mute: false }, (settings) => {
-    enabled = settings.enabled;
-    mute = settings.mute;
+chrome.storage.local.get(
+    {
+        detectionEnabled: true,
+        soundEnabled: true,
+        debugEnabled: false,
+        confidence: 22,
+        obfuscation: "standard"
+    },
+    (settings) => {
+        enabled = settings.detectionEnabled;
+        mute = !settings.soundEnabled;
+        debug = settings.debugEnabled;
+        scoreThreshold = settings.confidence / 100;
+        obfuscationMode = settings.obfuscation;
 
-    if (enabled) {
-        findVideo();
+        if (enabled) {
+            findVideo();
+        }
     }
-});
+);
 
-chrome.storage.onChanged.addListener((changes) => {
+chrome.storage.onChanged.addListener((changes, area) => {
 
-    if (changes.enabled) {
+    if (area !== "local") return;
 
-        enabled = changes.enabled.newValue;
+    if (changes.detectionEnabled) {
+
+        enabled = changes.detectionEnabled.newValue;
 
         if (enabled) {
             console.log("✅ RearAware enabled");
@@ -86,8 +108,21 @@ chrome.storage.onChanged.addListener((changes) => {
         }
     }
 
-    if (changes.mute) {
-        mute = changes.mute.newValue;
+    if (changes.soundEnabled) {
+        mute = !changes.soundEnabled.newValue;
+    }
+
+    if (changes.debugEnabled) {
+        debug = changes.debugEnabled.newValue;
+    }
+
+    if (changes.confidence) {
+        scoreThreshold = changes.confidence.newValue / 100;
+    }
+
+    if (changes.obfuscation) {
+        obfuscationMode = changes.obfuscation.newValue;
+        if (initialized) setObfuscationMode(obfuscationMode); // live-swap the sticker mid-call
     }
 
 });
@@ -162,23 +197,139 @@ function setupCanvas() {
     ctx = canvas.getContext("2d", { willReadFrequently: true });
 }
 
+// ---------------------------------------------------------------------------
+// Sticker (obfuscation overlay) - three modes, one shared position/sizing
+// pipeline. Each mode maps to a media file; "all-seeing" is a looping video
+// (canvas-composited GIFs don't animate, so it ships as webm instead),
+// the other two are static images.
+// ---------------------------------------------------------------------------
+
+const STICKER_ASSETS = {
+    "standard": { type: "image", src: "assets/censored.png", scale: 1.6 },
+    "all-seeing": { type: "video", src: "assets/sauron.webm", scale: 2.4 },
+    "nicolas-cage": { type: "image", src: "assets/nicolascage.webp", scale: 2.6 }
+};
+
+let stickerScale = 1.6; // how much bigger than the raw detection box to draw the sticker - set per-mode below
+
+function buildStickerElement(mode) {
+
+    const config = STICKER_ASSETS[mode] || STICKER_ASSETS.standard;
+    let el;
+
+    if (config.type === "video") {
+
+        el = document.createElement("video");
+        el.src = chrome.runtime.getURL(config.src);
+        el.loop = true;
+        el.muted = true;       // required for autoplay to be allowed
+        el.playsInline = true;
+        el.autoplay = true;
+
+        el.addEventListener("loadedmetadata", () => {
+            stickerAspect = el.videoWidth / el.videoHeight;
+        });
+
+        el.play().catch(() => {}); // ignore autoplay-policy rejections (should be fine since it's muted)
+
+    } else {
+
+        el = document.createElement("img");
+        el.src = chrome.runtime.getURL(config.src);
+
+        el.onload = () => {
+            stickerAspect = el.naturalWidth / el.naturalHeight;
+        };
+
+    }
+
+    el.style.position = "fixed";
+    el.style.pointerEvents = "none";
+    el.style.zIndex = "999999";
+    el.style.display = "none"; // hidden until a detection clears the threshold
+
+    return el;
+
+}
+
+function setObfuscationMode(mode) {
+
+    obfuscationMode = STICKER_ASSETS[mode] ? mode : "standard";
+    stickerScale = STICKER_ASSETS[obfuscationMode].scale ?? 1.6;
+
+    // Carry over the outgoing sticker's position/visibility so switching
+    // modes mid-call doesn't cause a visible flash or jump to (0,0).
+    const wasVisible = sticker && sticker.style.display !== "none";
+    const previousStyle = sticker
+        ? {
+            width: sticker.style.width,
+            height: sticker.style.height,
+            left: sticker.style.left,
+            top: sticker.style.top
+        }
+        : null;
+
+    if (sticker) sticker.remove();
+
+    sticker = buildStickerElement(obfuscationMode);
+    document.body.appendChild(sticker);
+
+    if (previousStyle) {
+        sticker.style.width = previousStyle.width;
+        sticker.style.height = previousStyle.height;
+        sticker.style.left = previousStyle.left;
+        sticker.style.top = previousStyle.top;
+    }
+    if (wasVisible) sticker.style.display = "block";
+
+}
+
 function createSticker() {
 
     if (sticker) return;
 
-    sticker = document.createElement("img");
-    sticker.src = chrome.runtime.getURL("assets/censored.png");
+    setObfuscationMode(obfuscationMode);
+    createDebugBoxes();
 
-    sticker.onload = () => {
-        stickerAspect = sticker.naturalWidth / sticker.naturalHeight;
-    };
+}
 
-    sticker.style.position = "fixed";
-    sticker.style.pointerEvents = "none";
-    sticker.style.zIndex = "999999";
-    sticker.style.display = "none"; // hidden until a detection clears the threshold
+const DEBUG_CLASS_INFO = [
+    { name: "CAT_00", color: "#3b82f6" },   // blue
+    { name: "CAT_FACE", color: "#22c55e" },  // green
+    { name: "CAT_BUTT", color: "#ef4444" }   // red
+];
 
-    document.body.appendChild(sticker);
+function createDebugBoxes() {
+
+    if (debugBoxes) return;
+
+    debugBoxes = DEBUG_CLASS_INFO.map(({ name, color }) => {
+
+        const box = document.createElement("div");
+
+        box.style.position = "fixed";
+        box.style.pointerEvents = "none";
+        box.style.zIndex = "999999";
+        box.style.border = `2px solid ${color}`;
+        box.style.boxSizing = "border-box";
+        box.style.display = "none";
+
+        const label = document.createElement("span");
+        label.style.position = "absolute";
+        label.style.top = "-20px";
+        label.style.left = "-2px";
+        label.style.background = color;
+        label.style.color = "#fff";
+        label.style.font = "12px monospace";
+        label.style.padding = "1px 5px";
+        label.style.whiteSpace = "nowrap";
+        box.appendChild(label);
+
+        document.body.appendChild(box);
+
+        return { name, el: box, label };
+
+    });
 
 }
 
@@ -259,7 +410,7 @@ async function runDetection() {
 
     const boxes = results.output0.data; // flattened [300, 6]: x1, y1, x2, y2, score, class
     let best = null;
-    const bestScorePerClass = [0, 0, 0]; // [cat, face, butt] - for debug logging below
+    const bestPerClass = [null, null, null]; // [cat, face, butt] - full boxes, for debug view
 
     for (let i = 0; i < 300; i++) {
 
@@ -267,12 +418,20 @@ async function runDetection() {
         const score = boxes[o + 4];
         const cls = boxes[o + 5];
 
-        if (cls >= 0 && cls <= 2 && score > bestScorePerClass[cls]) {
-            bestScorePerClass[cls] = score;
+        if (cls >= 0 && cls <= 2 && score >= scoreThreshold) {
+            if (!bestPerClass[cls] || score > bestPerClass[cls].score) {
+                bestPerClass[cls] = {
+                    x1: boxes[o],
+                    y1: boxes[o + 1],
+                    x2: boxes[o + 2],
+                    y2: boxes[o + 3],
+                    score
+                };
+            }
         }
 
         if (cls !== BUTT_CLASS) continue; // ignore other classes (e.g. "cat" as a whole)
-        if (score < SCORE_THRESHOLD) continue;
+        if (score < scoreThreshold) continue;
 
         if (!best || score > best.score) {
             best = {
@@ -288,24 +447,35 @@ async function runDetection() {
 
     // Throttled so it doesn't flood the console at ~30fps - logs roughly
     // twice a second. Watch this while the sticker fails to show: if the
-    // "butt" number is just under SCORE_THRESHOLD, lower the threshold. If
+    // "butt" number is just under scoreThreshold, lower the threshold. If
     // it's near zero while "cat" is high, the model is misclassifying that
     // angle/pose as "cat" instead of "butt" - a harder, training-data problem.
     debugFrameCount++;
     if (debugFrameCount % 15 === 0) {
         console.log(
-            `🔍 best scores - cat: ${bestScorePerClass[0].toFixed(2)}, ` +
-            `face: ${bestScorePerClass[1].toFixed(2)}, ` +
-            `butt: ${bestScorePerClass[2].toFixed(2)} ` +
-            `(threshold: ${SCORE_THRESHOLD})`
+            `🔍 best scores - cat: ${(bestPerClass[0]?.score ?? 0).toFixed(2)}, ` +
+            `face: ${(bestPerClass[1]?.score ?? 0).toFixed(2)}, ` +
+            `butt: ${(bestPerClass[2]?.score ?? 0).toFixed(2)} ` +
+            `(threshold: ${scoreThreshold})`
         );
     }
 
-    if (best) {
+    // Model space (stretched to MODEL_SIZE) -> raw video pixel space
+    const scaleX = video.videoWidth / MODEL_SIZE;
+    const scaleY = video.videoHeight / MODEL_SIZE;
 
-        // Model space (stretched to MODEL_SIZE) -> raw video pixel space
-        const scaleX = video.videoWidth / MODEL_SIZE;
-        const scaleY = video.videoHeight / MODEL_SIZE;
+    latestDetections = bestPerClass.map((box) => {
+        if (!box) return null;
+        return {
+            x1: box.x1 * scaleX,
+            y1: box.y1 * scaleY,
+            x2: box.x2 * scaleX,
+            y2: box.y2 * scaleY,
+            score: box.score
+        };
+    });
+
+    if (best) {
 
         latestDetection = {
             x1: best.x1 * scaleX,
@@ -351,7 +521,13 @@ function startPositionLoop() {
 
         if (!enabled) return;
 
-        positionSticker();
+        if (debug) {
+            if (sticker) sticker.style.display = "none";
+            positionDebugBoxes();
+        } else {
+            hideDebugBoxes();
+            positionSticker();
+        }
 
         rafId = requestAnimationFrame(tick);
 
@@ -361,8 +537,7 @@ function startPositionLoop() {
 
 }
 
-const SMOOTHING = 0.6;        // higher = snappier but jumpier, lower = smoother but more "laggy"
-const STICKER_SCALE = 1.0;    // 1.0 = sticker height matches the detection box height exactly
+const SMOOTHING = 0.1;        // higher = snappier but jumpier, lower = smoother but more "laggy"
 
 function isVideoMirrored(el) {
 
@@ -375,6 +550,60 @@ function isVideoMirrored(el) {
     if (!match) return false;
 
     return parseFloat(match[1]) < 0;
+
+}
+
+// Maps a raw-video-pixel-space box to on-screen coordinates (including
+// object-fit: cover handling and mirror correction). Returns null if the
+// video isn't ready to measure yet. Shared by both the sticker and the
+// debug box view so they always agree on positioning.
+function mapBoxToScreen(box, video) {
+
+    const rect = video.getBoundingClientRect();
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    if (!vw || !vh || !rect.width || !rect.height) return null;
+
+    // Map raw video pixel space -> the on-screen rect, assuming CSS
+    // object-fit: cover (the common case for video call tiles).
+    // If a site uses object-fit: contain instead, flip the comparison below.
+    const videoAspect = vw / vh;
+    const rectAspect = rect.width / rect.height;
+
+    let renderScale, offsetX = 0, offsetY = 0;
+
+    if (videoAspect > rectAspect) {
+        // video is relatively wider than the box -> left/right get clipped
+        renderScale = rect.height / vh;
+        offsetX = (vw * renderScale - rect.width) / 2;
+    } else {
+        // video is relatively taller than the box -> top/bottom get clipped
+        renderScale = rect.width / vw;
+        offsetY = (vh * renderScale - rect.height) / 2;
+    }
+
+    let x1 = box.x1 * renderScale - offsetX;
+    const y1 = box.y1 * renderScale - offsetY;
+    let x2 = box.x2 * renderScale - offsetX;
+    const y2 = box.y2 * renderScale - offsetY;
+
+    // Meet mirrors your own camera preview horizontally (like a mirror) so
+    // it feels natural to look at, but the raw video data we detect against
+    // is NOT mirrored. Flip our x-coordinates to match what's actually shown.
+    if (isVideoMirrored(video)) {
+        const mirroredX1 = rect.width - x2;
+        const mirroredX2 = rect.width - x1;
+        x1 = mirroredX1;
+        x2 = mirroredX2;
+    }
+
+    return {
+        x1: rect.left + x1,
+        y1: rect.top + y1,
+        x2: rect.left + x2,
+        y2: rect.top + y2
+    };
 
 }
 
@@ -399,49 +628,13 @@ function positionSticker() {
 
     }
 
-    const rect = video.getBoundingClientRect();
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-
-    if (!vw || !vh || !rect.width || !rect.height) return;
-
-    // Map raw video pixel space -> the on-screen rect, assuming CSS
-    // object-fit: cover (the common case for video call tiles).
-    // If a site uses object-fit: contain instead, flip the comparison below.
-    const videoAspect = vw / vh;
-    const rectAspect = rect.width / rect.height;
-
-    let renderScale, offsetX = 0, offsetY = 0;
-
-    if (videoAspect > rectAspect) {
-        // video is relatively wider than the box -> left/right get clipped
-        renderScale = rect.height / vh;
-        offsetX = (vw * renderScale - rect.width) / 2;
-    } else {
-        // video is relatively taller than the box -> top/bottom get clipped
-        renderScale = rect.width / vw;
-        offsetY = (vh * renderScale - rect.height) / 2;
-    }
-
-    let x1 = latestDetection.x1 * renderScale - offsetX;
-    const y1 = latestDetection.y1 * renderScale - offsetY;
-    let x2 = latestDetection.x2 * renderScale - offsetX;
-    const y2 = latestDetection.y2 * renderScale - offsetY;
-
-    // Meet mirrors your own camera preview horizontally (like a mirror) so
-    // it feels natural to look at, but the raw video data we detect against
-    // is NOT mirrored. Flip our x-coordinates to match what's actually shown.
-    if (isVideoMirrored(video)) {
-        const mirroredX1 = rect.width - x2;
-        const mirroredX2 = rect.width - x1;
-        x1 = mirroredX1;
-        x2 = mirroredX2;
-    }
+    const screen = mapBoxToScreen(latestDetection, video);
+    if (!screen) return;
 
     const target = {
-        cx: (x1 + x2) / 2,
-        cy: (y1 + y2) / 2,
-        height: y2 - y1
+        cx: (screen.x1 + screen.x2) / 2,
+        cy: (screen.y1 + screen.y2) / 2,
+        height: screen.y2 - screen.y1
     };
 
     // Ease toward the target instead of snapping straight to it - this is
@@ -454,17 +647,53 @@ function positionSticker() {
         smoothedBox.height += (target.height - smoothedBox.height) * SMOOTHING;
     }
 
-    // Scale using the image's own aspect ratio (not the detection box's
+    // Scale using the media's own aspect ratio (not the detection box's
     // ratio) so it doesn't stretch/squish - only its size changes.
-    const height = smoothedBox.height * STICKER_SCALE;
+    const height = smoothedBox.height * stickerScale;
     const width = height * stickerAspect;
 
     sticker.style.width = `${width}px`;
     sticker.style.height = `${height}px`;
-    sticker.style.left = `${rect.left + smoothedBox.cx - width / 2}px`;
-    sticker.style.top = `${rect.top + smoothedBox.cy - height / 2}px`;
+    sticker.style.left = `${smoothedBox.cx - width / 2}px`;
+    sticker.style.top = `${smoothedBox.cy - height / 2}px`;
     sticker.style.display = "block";
 
+}
+
+function positionDebugBoxes() {
+
+    if (!video || !debugBoxes) return;
+
+    debugBoxes.forEach(({ el, label }, i) => {
+
+        const detection = latestDetections[i];
+
+        if (!detection) {
+            el.style.display = "none";
+            return;
+        }
+
+        const screen = mapBoxToScreen(detection, video);
+        if (!screen) {
+            el.style.display = "none";
+            return;
+        }
+
+        el.style.left = `${screen.x1}px`;
+        el.style.top = `${screen.y1}px`;
+        el.style.width = `${screen.x2 - screen.x1}px`;
+        el.style.height = `${screen.y2 - screen.y1}px`;
+        el.style.display = "block";
+
+        label.textContent = `${DEBUG_CLASS_INFO[i].name} ${detection.score.toFixed(2)}`;
+
+    });
+
+}
+
+function hideDebugBoxes() {
+    if (!debugBoxes) return;
+    debugBoxes.forEach(({ el }) => { el.style.display = "none"; });
 }
 
 // ---------------------------------------------------------------------------
@@ -490,8 +719,14 @@ function stopEverything() {
         sticker = null;
     }
 
+    if (debugBoxes) {
+        debugBoxes.forEach(({ el }) => el.remove());
+        debugBoxes = null;
+    }
+
     video = null;
     latestDetection = null;
+    latestDetections = [null, null, null];
     wasDetected = false;
     lastSoundTime = 0;
     lastDetectionTime = 0;

@@ -1,47 +1,96 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>🐈 RearAware</title>
-
-    <link rel="stylesheet" href="popup.css">
+<meta charset="UTF-8" />
+<title>RearAware</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="popup.css">
 </head>
-
 <body>
 
-    <h1>RearAware</h1>
-    
-    <div class="version" id="version"></div>
+<div class="popup" id="popup">
 
-    <div class="setting">
-
-        <span>Enabled</span>
-
-        <label class="switch">
-            <input type="checkbox" id="enabled">
-            <span class="slider"></span>
-        </label>
-
+  <!-- ============ HEADER ============ -->
+  <div class="header-row">
+    <img class="logo" src="/icons/ra128.png" alt="Wolfe" onerror="this.style.background='#222'"/>
+    <div class="badge badge--version" id="versionBadge">Version —</div>
+    <div class="badge badge--status" id="statusBadge" aria-live="polite">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusLabel">Detection: On</span>
     </div>
+  </div>
 
-    <div class="setting">
+  <!-- ============ TITLE + MASTER TOGGLE ============ -->
+  <div class="title-row">
+    <div class="wordmark">RearAware</div>
+    <div class="master-toggle-cell">
+      <button class="toggle" id="masterToggle" data-icon="master-toggle" aria-checked="true" aria-label="Enable RearAware">
+        <span class="toggle-knob"></span>
+      </button>
+    </div>
+  </div>
 
-    <label class="checkbox-label">
-        <input type="checkbox" id="mute">
-        <span>Mute</span>
-    </label>
+  <!-- ============ CONFIDENCE THRESHOLD ============ -->
+  <div class="row row--stack">
+    <div class="row-header">
+      <img class="row-icon" src="/icons/robot.svg" alt="" data-icon="robot" width="16" height="16" />
+      <span class="row-label">Confidence threshold</span>
+      <span class="row-value" id="thresholdValue">[50%]</span>
+    </div>
+    <input type="range" min="0" max="100" value="22" step="1" class="slider" id="thresholdSlider" aria-label="Confidence threshold" />
+    <p class="helper-text">Lower values are more likely to detect cats, but may increase false positives.</p>
+  </div>
+
+  <!-- ============ OBFUSCATION TYPE ============ -->
+  <div class="row row--stack">
+    <div class="row-header">
+      <img class="row-icon" src="/icons/cat.svg" alt="" data-icon="cat" width="16" height="16" />
+      <span class="row-label">Obfuscation type</span>
+    </div>
+    <div class="chip-group" role="radiogroup" aria-label="Obfuscation type">
+      <button class="chip is-selected" type="button" role="radio" aria-checked="true" data-value="standard">Standard</button>
+      <button class="chip" type="button" role="radio" aria-checked="false" data-value="all-seeing">All-seeing</button>
+      <button class="chip" type="button" role="radio" aria-checked="false" data-value="nicolas-cage">Nicolas Cage</button>
+    </div>
+  </div>
+
+  <!-- ============ AUDIO FEEDBACK ============ -->
+  <div class="row row--inline">
+    <img class="row-icon" src="/icons/volume.svg" alt="" data-icon="volume" width="16" height="16" />
+    <span class="row-label">Audio feedback</span>
+    <button class="toggle" id="soundToggle" data-icon="sound-toggle" aria-checked="true" aria-label="Audio feedback">
+      <span class="toggle-knob"></span>
+    </button>
+  </div>
+
+  <!-- ============ DEVELOPER MODE ============ -->
+  <div class="row row--stack">
+    <p class="section-label">Developer mode</p>
+    <div class="row-header row-header--no-gap-below">
+      <img class="row-icon" src="/icons/bug.svg" alt="" data-icon="bug" width="16" height="16" />
+      <span class="row-label">Bounding boxes (debug)</span>
+      <button class="toggle" id="debugToggle" data-icon="debug-toggle" aria-checked="false" aria-label="Bounding boxes debug overlay">
+        <span class="toggle-knob"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ FOOTER BUTTONS ============ -->
+  <div class="button-row">
+    <button class="btn btn--primary" id="reportBtn" type="button">Report issue</button>
+    <button class="btn btn--secondary" id="learnBtn" type="button">Learn more</button>
+  </div>
+
+  <!-- ============ SCROLLING TICKER ============ -->
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker-track" id="tickerTrack">
+      <!-- duplicated content injected by JS for seamless loop -->
+    </div>
+  </div>
 
 </div>
 
-    <hr>
-
-    <a id="issues" href="#">🐞 Report an issue</a>
-
-    <a id="github" href="#">💻 GitHub</a>
-
-    <script type="module" src="popup.js"></script>
-
+<script type="module" src="popup.js"></script>
 </body>
-
 </html>
