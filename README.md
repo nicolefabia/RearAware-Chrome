@@ -72,7 +72,7 @@ Everything else (sound, obfuscation style, confidence threshold, and a developer
 
 - A custom YOLO model (trained with Ultralytics and exported to ONNX) detects three classes: cat, face and butt.
 - Inference runs client-side using [onnxruntime-web](https://github.com/microsoft/onnxruntime), using the WebGPU execution provider when available.
-- A content script captures webcam frames from the call's video element, runs detection, and overlays your chosen censor style positioned and scaled to match the detected region — including correcting for Meet's mirrored self-view.
+- A content script captures webcam frames from the call's video element, runs detection, and overlays your chosen censor style positioned and scaled to match the detected region (including correcting for Meet's mirrored self-view).
 
 **Dedicated to Wolfe Shah 🩶**
 
