@@ -2,7 +2,7 @@
 
 Because your cat has no sense of professional boundaries.
 
-RearAware is a real time AI webcam filter that detects and censors cat butts during video calls. Powered by a custom-trained YOLO model running entirely on-device via ONNX Runtime and WebGPU. It identifies feline rear ends in real time and automatically covers them with a CENSORED sticker. No video ever leaves your computer.
+RearAware is a real-time AI webcam filter that detects and censors cat butts during video calls. Powered by a custom-trained YOLO model running entirely on-device via ONNX Runtime and WebGPU. It identifies feline rear ends in real time and automatically covers them with your choice of censor overlay. No video ever leaves your computer.
 
 Currently supports Google Meet. Microsoft Teams support is in progress.
 
@@ -11,15 +11,17 @@ Currently supports Google Meet. Microsoft Teams support is in progress.
 ## Features
 
 - 🐈 Real-time cat butt detection and censoring, powered by a custom-trained YOLO model
+- 🎭 Three censor styles to choose from: Standard, All-seeing, and Nicolas Cage
+- 🎚️ Adjustable confidence threshold, so you can tune how sensitive detection is
 - ⚡ GPU-accelerated (WebGPU) with an automatic fallback to CPU if WebGPU isn't available
 - 🔊 Random sound effects on detection (mutable)
-- 🔒 100% on-device (no video, images, or data are ever sent anywhere)
-- 🎚️ Simple on/off and mute toggles from the extension popup
+- 🐛 Developer mode with a bounding boxes debug overlay, for anyone curious what the model's actually seeing
+- 🔒 100% on device (no video, images, or data are ever sent anywhere)
+- 🎨 A popup that's honestly more designed than a joke browser extension has any right to be
 
 ## Installation
 
 **Chrome Web Store:**
-
 https://chromewebstore.google.com/detail/bhehiighjgekghjjmdhjkloflobanmad?utm_source=item-share-cb
 
 **Manual install (for developers):**
@@ -45,7 +47,18 @@ Requires Node.js installed
 2. Join a video call on **Google Meet**.
 3. That's it :) your cat's dignity is now protected.
 
-Toggle it off, or mute the sound effects, from the extension popup at any time.
+Everything else (sound, obfuscation style, confidence threshold, and a developer-mode debug overlay) is adjustable any time from the extension popup.
+
+### Popup settings
+
+- **Detection:** master on/off switch for the whole extension.
+- **Confidence threshold:** how confident the model needs to be before it censors something. Lower values catch more cats but risk more false positives.
+- **Obfuscation type:** pick your censor style:
+  - **Standard:** the classic censor sticker.
+  - **All-seeing:** a looping Eye of Sauron.
+  - **Nicolas Cage:** no further explanation offered.
+- **Audio feedback:** random sound effect on detection, mutable.
+- **Developer mode → Bounding boxes (debug):** draws the model's raw detection boxes (cat / face / butt, with confidence scores) instead of a sticker, for debugging or curiosity. The obfuscation picker is disabled while this is on, since nothing's being censored in this mode.
 
 ## Notes
 
@@ -59,8 +72,9 @@ Toggle it off, or mute the sound effects, from the extension popup at any time.
 
 - A custom YOLO model (trained with Ultralytics and exported to ONNX) detects three classes: cat, face and butt.
 - Inference runs client-side using [onnxruntime-web](https://github.com/microsoft/onnxruntime), using the WebGPU execution provider when available.
-- A content script captures webcam frames from the call's video element, runs detection, and overlays a censor sticker positioned and scaled to match the detected region — including correcting for Meet's mirrored self-view.
+- A content script captures webcam frames from the call's video element, runs detection, and overlays your chosen censor style positioned and scaled to match the detected region — including correcting for Meet's mirrored self-view.
 
 **Dedicated to Wolfe Shah 🩶**
 
 ⚠️ Early beta ⚠️ This is a hobby project, not a polished product. Detection isn't perfect: it may occasionally miss a butt, or censor something that isn't one. Expect bugs, and expect it to get better over time!
+
