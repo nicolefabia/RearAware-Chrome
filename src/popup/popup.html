@@ -13,7 +13,7 @@
 
   <!-- ============ HEADER ============ -->
   <div class="header-row">
-    <img class="logo" src="/icons/ra128.png" alt="Wolfe" onerror="this.style.background='#222'"/>
+    <img class="logo" src="/icons/wolfe-blue.jpg" alt="Wolfe" onerror="this.style.background='#222'"/>
     <div class="badge badge--version" id="versionBadge">Version —</div>
     <div class="badge badge--status" id="statusBadge" aria-live="polite">
       <span class="status-dot" id="statusDot"></span>
@@ -48,11 +48,12 @@
       <img class="row-icon" src="/icons/cat.svg" alt="" data-icon="cat" width="16" height="16" />
       <span class="row-label">Obfuscation type</span>
     </div>
-    <div class="chip-group" role="radiogroup" aria-label="Obfuscation type">
+    <div class="chip-group" id="chipGroup" role="radiogroup" aria-label="Obfuscation type">
       <button class="chip is-selected" type="button" role="radio" aria-checked="true" data-value="standard">Standard</button>
       <button class="chip" type="button" role="radio" aria-checked="false" data-value="all-seeing">All-seeing</button>
       <button class="chip" type="button" role="radio" aria-checked="false" data-value="nicolas-cage">Nicolas Cage</button>
     </div>
+    <p class="helper-text" id="obfuscationHelper" hidden>Hidden while Bounding boxes (debug) is on.</p>
   </div>
 
   <!-- ============ AUDIO FEEDBACK ============ -->

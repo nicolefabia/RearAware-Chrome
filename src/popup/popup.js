@@ -49,6 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const slider = document.getElementById('thresholdSlider');
   const thresholdValue = document.getElementById('thresholdValue');
   const chips = document.querySelectorAll('.chip');
+  const chipGroup = document.getElementById('chipGroup');
+  const obfuscationHelper = document.getElementById('obfuscationHelper');
 
   // ---------- Generic toggle wiring (buttons using aria-checked) ----------
   function wireToggle(el, { onChange } = {}) {
@@ -65,19 +67,43 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Elements that go inert when Detection is off — everything that only makes
-  // sense while the detector is actually running.
+  // sense while the detector is actually running. (Chips are handled separately
+  // below since they also depend on whether debug mode is on.)
   function setDependentControlsDisabled(isDisabled) {
     soundToggle.disabled = isDisabled;
     debugToggle.disabled = isDisabled;
     slider.disabled = isDisabled;
+  }
+
+  let isMasterOff = false;
+
+  // The obfuscation picker is irrelevant while Bounding boxes (debug) is on —
+  // content.js hides the sticker entirely in favor of the debug boxes — so
+  // it's disabled whenever either Detection is off OR debug mode is on.
+  // The slider stays independently enabled in debug mode since threshold
+  // still affects what gets boxed.
+  function updateChipsDisabled() {
+    const debugOn = debugToggle.getAttribute('aria-checked') === 'true';
+    const isDisabled = isMasterOff || debugOn;
     chips.forEach((chip) => { chip.disabled = isDisabled; });
+    // Only explain the "why" when debug is the actual cause — if Detection
+    // itself is off, the status badge already covers that.
+    const showDebugReason = debugOn && !isMasterOff;
+    obfuscationHelper.hidden = !showDebugReason;
+    if (showDebugReason) {
+      chipGroup.title = 'Hidden while Bounding boxes (debug) is on';
+    } else {
+      chipGroup.removeAttribute('title');
+    }
   }
 
   function setMasterState(isOn) {
     setToggleState(masterToggle, isOn);
     popup.classList.toggle('is-off', !isOn);
     statusLabel.textContent = isOn ? 'Detection: On' : 'Detection: Off';
+    isMasterOff = !isOn;
     setDependentControlsDisabled(!isOn);
+    updateChipsDisabled();
   }
 
   wireToggle(masterToggle, {
@@ -92,7 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   wireToggle(debugToggle, {
-    onChange: (isOn) => saveSetting('debugEnabled', isOn)
+    onChange: (isOn) => {
+      saveSetting('debugEnabled', isOn);
+      updateChipsDisabled();
+    }
   });
 
   // ---------- Confidence threshold slider ----------
@@ -125,9 +154,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- Apply loaded (or default) settings on open ----------
   loadSettings((settings) => {
-    setMasterState(settings.detectionEnabled);
     setToggleState(soundToggle, settings.soundEnabled);
     setToggleState(debugToggle, settings.debugEnabled);
+    setMasterState(settings.detectionEnabled); // reads debugToggle's state, so must run after it's set above
     slider.value = settings.confidence;
     updateSlider();
     selectChip(settings.obfuscation);
