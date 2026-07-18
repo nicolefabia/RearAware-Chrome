@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "RearAware",
-  "version": "0.2.1",
-  "version_name": "0.2.1 Beta",
+  "version": "0.2.2",
+  "version_name": "0.2.2 Beta",
   "description": "Real-time AI webcam filter that detects and censors cat butts during video calls.",
 
   "action": {
@@ -51,7 +51,6 @@
     {
       "resources": [
         "assets/*",
-        "models/*",
         "sounds/*"
       ],
       "matches": [
