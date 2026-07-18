@@ -4,7 +4,7 @@ Because your cat has no sense of professional boundaries.
 
 RearAware is a real-time AI webcam filter that detects and censors cat butts during video calls. Powered by a custom-trained YOLO model running entirely on-device via ONNX Runtime and WebGPU. It identifies feline rear ends in real time and automatically covers them with your choice of censor overlay. No video ever leaves your computer.
 
-Currently supports Google Meet. Microsoft Teams support is in progress.
+Supports Google Meet and Microsoft Teams.
 
 ![RearAware demo](rearaware-chrome-nobodyasked.jpg)
 
@@ -44,7 +44,7 @@ Requires Node.js installed
 ## Using it in a meeting
 
 1. Make sure RearAware is enabled.
-2. Join a video call on **Google Meet**.
+2. Join a video call on **Google Meet** or **Microsoft Teams**.
 3. That's it :) your cat's dignity is now protected.
 
 Everything else (sound, obfuscation style, confidence threshold, and a developer-mode debug overlay) is adjustable any time from the extension popup.
@@ -67,14 +67,14 @@ Everything else (sound, obfuscation style, confidence threshold, and a developer
 - Sound effects are random. You're welcome.
 - Detection isn't perfect yet. It may occasionally miss a butt, or very rarely censor something that isn't one. It's a fun tool, not a guarantee.
 - Requires a browser with WebGPU support (recent versions of Chrome) for full speed; falls back to a slower CPU-only mode otherwise.
+- Multiple tabs with active calls (e.g. Meet and Teams open at once) are supported - detection is shared fairly across them rather than conflicting.
 
 ## How it works
 
 - A custom YOLO model (trained with Ultralytics and exported to ONNX) detects three classes: cat, face and butt.
-- Inference runs client-side using [onnxruntime-web](https://github.com/microsoft/onnxruntime), using the WebGPU execution provider when available.
-- A content script captures webcam frames from the call's video element, runs detection, and overlays your chosen censor style positioned and scaled to match the detected region (including correcting for Meet's mirrored self-view).
+- Inference runs in a background **offscreen document** rather than directly in the page, using [onnxruntime-web](https://github.com/microsoft/onnxruntime) with the WebGPU execution provider when available. This keeps detection working even on sites (like Teams) whose own security policy would otherwise block it.
+- A content script captures webcam frames from the call's video element, sends them to the offscreen document for detection, and overlays your chosen censor style positioned and scaled to match the detected region (including correcting for a mirrored self-view).
 
 **Dedicated to Wolfe Shah 🩶**
 
 ⚠️ Early beta ⚠️ This is a hobby project, not a polished product. Detection isn't perfect: it may occasionally miss a butt, or censor something that isn't one. Expect bugs, and expect it to get better over time!
-
