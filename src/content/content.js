@@ -2,19 +2,15 @@ console.log("🐈 RearAware loaded!");
 
 const MODEL_SIZE = 320;         // model expects [1, 3, 320, 320]
 let scoreThreshold = 0.22;   // minimum confidence to show the sticker - adjustable live via the popup slider
-const DETECT_INTERVAL_MS = 0; // no artificial floor - just run again as soon as the previous detection finishes
-
-let ort = null; // filled in once startDetectionLoop() knows which backend (webgpu/wasm) detector.js actually loaded
+const DETECT_INTERVAL_MS = 20; // small safety floor - cheap insurance against overload if multiple frames ever detect concurrently
 
 let enabled = true;
 let mute = false;
 let debug = false;
-let obfuscationMode = "standard"; // "standard" | "all-seeing" | "nicolas-cage" - which sticker to draw
 
 let video = null;
 let sticker = null;
 let debugBoxes = null; // { cat, face, butt } DOM elements, created lazily
-let session = null;
 
 let canvas = null;
 let ctx = null;
@@ -29,7 +25,7 @@ let detectTimer = null;
 let detectionActive = false; // set false to stop the self-rescheduling detection loop
 let rafId = null;
 
-let stickerAspect = 1; // width / height of the active sticker media, filled in once it loads
+let stickerAspect = 1; // width / height of censored.png, filled in once it loads
 let smoothedBox = null; // { cx, cy, height } in screen px - eased toward the latest detection each frame
 
 const SOUND_COOLDOWN_MS = 3000; // mirrors sound_cooldown in rearaware.py
@@ -65,11 +61,11 @@ function playRandomSound() {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
-// Uses chrome.storage.local, matching popup.js's key names exactly (Detection
-// on/off, Sound, Bounding boxes debug, Confidence threshold, Obfuscation type).
-// "confidence" arrives as a 0-100 percentage from the popup slider and is
-// converted to the 0-1 range this file's scoreThreshold expects.
 
+// Uses chrome.storage.local, matching popup.js's actual key names (this
+// previously used chrome.storage.sync with made-up key names, which meant
+// the popup and content script were never actually talking to each other).
+// "confidence" arrives as a 0-100 percentage from the popup slider.
 chrome.storage.local.get(
     {
         detectionEnabled: true,
@@ -83,7 +79,7 @@ chrome.storage.local.get(
         mute = !settings.soundEnabled;
         debug = settings.debugEnabled;
         scoreThreshold = settings.confidence / 100;
-        obfuscationMode = settings.obfuscation;
+        obfuscationType = settings.obfuscation;
 
         if (enabled) {
             findVideo();
@@ -91,9 +87,7 @@ chrome.storage.local.get(
     }
 );
 
-chrome.storage.onChanged.addListener((changes, area) => {
-
-    if (area !== "local") return;
+chrome.storage.onChanged.addListener((changes) => {
 
     if (changes.detectionEnabled) {
 
@@ -116,13 +110,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
         debug = changes.debugEnabled.newValue;
     }
 
-    if (changes.confidence) {
-        scoreThreshold = changes.confidence.newValue / 100;
+    if (changes.obfuscation) {
+        obfuscationType = changes.obfuscation.newValue;
+        if (sticker) setObfuscationMode(obfuscationType); // live-swap the sticker mid-call
     }
 
-    if (changes.obfuscation) {
-        obfuscationMode = changes.obfuscation.newValue;
-        if (initialized) setObfuscationMode(obfuscationMode); // live-swap the sticker mid-call
+    if (changes.confidence) {
+        scoreThreshold = changes.confidence.newValue / 100;
     }
 
 });
@@ -148,15 +142,18 @@ setInterval(() => {
 
 let initialized = false; // one-time setup (canvas/sticker/loops) happens only once, video re-acquisition can happen repeatedly
 
+const MIN_VIDEO_DIMENSION = 100; // filters out tiny decorative/thumbnail videos, not real webcam tiles
+
 function pickBestVideo() {
 
-    const videos = Array.from(document.querySelectorAll("video"));
+    const videos = Array.from(document.querySelectorAll("video"))
+        .filter(v => v.videoWidth >= MIN_VIDEO_DIMENSION && v.videoHeight >= MIN_VIDEO_DIMENSION);
 
     // Meet mutes your own camera tile to avoid audio feedback, so a muted
     // video with real dimensions is a decent signal for "this is you."
     // Other participants' videos are normally unmuted.
-    return videos.find(v => v.muted && v.videoWidth > 0)
-        || videos.find(v => v.videoWidth > 0)
+    return videos.find(v => v.muted)
+        || videos[0]
         || null;
 
 }
@@ -197,19 +194,17 @@ function setupCanvas() {
     ctx = canvas.getContext("2d", { willReadFrequently: true });
 }
 
-// ---------------------------------------------------------------------------
 // Sticker (obfuscation overlay) - three modes, one shared position/sizing
 // pipeline. Each mode maps to a media file; "all-seeing" is a looping video
 // (canvas-composited GIFs don't animate, so it ships as webm instead),
 // the other two are static images.
-// ---------------------------------------------------------------------------
-
 const STICKER_ASSETS = {
     "standard": { type: "image", src: "assets/censored.png", scale: 1.6 },
     "all-seeing": { type: "video", src: "assets/sauron.webm", scale: 2.4 },
-    "nicolas-cage": { type: "image", src: "assets/nicolascage.webp", scale: 2.6 }
+    "nicolas-cage": { type: "image", src: "assets/nicolascage.webp", scale: 2.2 }
 };
 
+let obfuscationType = "standard"; // synced from popup storage
 let stickerScale = 1.6; // how much bigger than the raw detection box to draw the sticker - set per-mode below
 
 function buildStickerElement(mode) {
@@ -222,7 +217,7 @@ function buildStickerElement(mode) {
         el = document.createElement("video");
         el.src = chrome.runtime.getURL(config.src);
         el.loop = true;
-        el.muted = true;       // required for autoplay to be allowed
+        el.muted = true; // required for autoplay to be allowed
         el.playsInline = true;
         el.autoplay = true;
 
@@ -254,8 +249,8 @@ function buildStickerElement(mode) {
 
 function setObfuscationMode(mode) {
 
-    obfuscationMode = STICKER_ASSETS[mode] ? mode : "standard";
-    stickerScale = STICKER_ASSETS[obfuscationMode].scale ?? 1.6;
+    obfuscationType = STICKER_ASSETS[mode] ? mode : "standard";
+    stickerScale = STICKER_ASSETS[obfuscationType].scale ?? 1.6;
 
     // Carry over the outgoing sticker's position/visibility so switching
     // modes mid-call doesn't cause a visible flash or jump to (0,0).
@@ -271,7 +266,7 @@ function setObfuscationMode(mode) {
 
     if (sticker) sticker.remove();
 
-    sticker = buildStickerElement(obfuscationMode);
+    sticker = buildStickerElement(obfuscationType);
     document.body.appendChild(sticker);
 
     if (previousStyle) {
@@ -288,7 +283,7 @@ function createSticker() {
 
     if (sticker) return;
 
-    setObfuscationMode(obfuscationMode);
+    setObfuscationMode(obfuscationType);
     createDebugBoxes();
 
 }
@@ -340,17 +335,12 @@ function createDebugBoxes() {
 async function startDetectionLoop() {
 
     try {
-        // Dynamic import() forces this to load as a real module, which is
-        // required for onnxruntime-web's code to run without crashing.
-        let loadModel, getOrt, getActiveBackend;
-        ({ loadModel, getOrt, getActiveBackend } = await import("./detector.js"));
-
-        session = await loadModel();
-        ort = getOrt(); // reuse whichever ort module (webgpu or wasm) detector.js actually loaded
-
-        console.log(`🚀 RearAware running on: ${getActiveBackend()}`);
+        // The offscreen document is created/managed by background.js - a
+        // content script can't create it directly. This just confirms it's
+        // actually ready before we start sending it frames.
+        await chrome.runtime.sendMessage({ type: "ensureOffscreenReady" });
     } catch (err) {
-        console.error("❌ RearAware failed to load model:", err);
+        console.error("❌ RearAware failed to reach background script:", err);
         return;
     }
 
@@ -365,7 +355,13 @@ function scheduleNextDetection() {
 
         if (!detectionActive) return;
 
-        await runDetection();
+        try {
+            await runDetection();
+        } catch (err) {
+            // Whatever went wrong, don't let it permanently kill the loop -
+            // worst case this is one skipped detection, not a dead extension.
+            console.error("❌ RearAware: unexpected error in detection loop:", err);
+        }
 
         if (detectionActive) scheduleNextDetection();
 
@@ -375,7 +371,7 @@ function scheduleNextDetection() {
 
 async function runDetection() {
 
-    if (!enabled || !video || !session) return;
+    if (!enabled || !video) return;
     if (video.readyState < 2 || video.videoWidth === 0) return; // not ready yet
 
     // Draw the current frame, stretched to the model's input size
@@ -383,67 +379,46 @@ async function runDetection() {
 
     const { data } = ctx.getImageData(0, 0, MODEL_SIZE, MODEL_SIZE); // RGBA, uint8
 
-    const pixelCount = MODEL_SIZE * MODEL_SIZE;
-    const chw = new Float32Array(3 * pixelCount);
-
-    for (let i = 0; i < pixelCount; i++) {
-        chw[i] = data[i * 4] / 255;                       // R plane
-        chw[pixelCount + i] = data[i * 4 + 1] / 255;       // G plane
-        chw[2 * pixelCount + i] = data[i * 4 + 2] / 255;   // B plane
-    }
-
-    const tensor = new ort.Tensor("float32", chw, [1, 3, MODEL_SIZE, MODEL_SIZE]);
-
-    let results;
     const inferenceStart = performance.now();
+    let response;
 
     try {
-        results = await session.run({ images: tensor });
+        response = await chrome.runtime.sendMessage({
+            type: "runInference",
+            imageData: data,
+            threshold: scoreThreshold
+        });
     } catch (err) {
-        console.error("❌ RearAware inference failed:", err);
+
+        // The connection to the offscreen document can occasionally drop
+        // mid-call (seen on Teams, likely from its own page doing something
+        // disruptive to the frame). Try to re-establish it once before
+        // giving up, so this becomes one skipped frame instead of a full
+        // break that needs a manual reload.
+        console.warn("⚠️ RearAware lost connection to offscreen document, reconnecting:", err.message);
+
+        try {
+            await chrome.runtime.sendMessage({ type: "ensureOffscreenReady" });
+            response = await chrome.runtime.sendMessage({
+                type: "runInference",
+                imageData: data,
+                threshold: scoreThreshold
+            });
+        } catch (retryErr) {
+            console.error("❌ RearAware failed to reach offscreen document after retry:", retryErr);
+            return;
+        }
+
+    }
+
+    if (response?.error) {
+        console.error("❌ RearAware inference failed:", response.error);
         return;
     }
 
     console.log(`⏱️ inference took ${(performance.now() - inferenceStart).toFixed(0)}ms`);
 
-    const BUTT_CLASS = 2; // matches `if cls == 2` in rearaware.py
-
-    const boxes = results.output0.data; // flattened [300, 6]: x1, y1, x2, y2, score, class
-    let best = null;
-    const bestPerClass = [null, null, null]; // [cat, face, butt] - full boxes, for debug view
-
-    for (let i = 0; i < 300; i++) {
-
-        const o = i * 6;
-        const score = boxes[o + 4];
-        const cls = boxes[o + 5];
-
-        if (cls >= 0 && cls <= 2 && score >= scoreThreshold) {
-            if (!bestPerClass[cls] || score > bestPerClass[cls].score) {
-                bestPerClass[cls] = {
-                    x1: boxes[o],
-                    y1: boxes[o + 1],
-                    x2: boxes[o + 2],
-                    y2: boxes[o + 3],
-                    score
-                };
-            }
-        }
-
-        if (cls !== BUTT_CLASS) continue; // ignore other classes (e.g. "cat" as a whole)
-        if (score < scoreThreshold) continue;
-
-        if (!best || score > best.score) {
-            best = {
-                x1: boxes[o],
-                y1: boxes[o + 1],
-                x2: boxes[o + 2],
-                y2: boxes[o + 3],
-                score
-            };
-        }
-
-    }
+    const bestPerClass = response.detections; // [cat, face, butt], already filtered by threshold
 
     // Throttled so it doesn't flood the console at ~30fps - logs roughly
     // twice a second. Watch this while the sticker fails to show: if the
@@ -456,7 +431,7 @@ async function runDetection() {
             `🔍 best scores - cat: ${(bestPerClass[0]?.score ?? 0).toFixed(2)}, ` +
             `face: ${(bestPerClass[1]?.score ?? 0).toFixed(2)}, ` +
             `butt: ${(bestPerClass[2]?.score ?? 0).toFixed(2)} ` +
-            `(threshold: ${scoreThreshold})`
+            `(threshold: ${scoreThreshold}, backend: ${response.backend})`
         );
     }
 
@@ -474,6 +449,8 @@ async function runDetection() {
             score: box.score
         };
     });
+
+    const best = bestPerClass[2]; // butt class, for the sticker
 
     if (best) {
 
@@ -607,7 +584,7 @@ function mapBoxToScreen(box, video) {
 
 }
 
-const GRACE_MS = 600; // how long to keep showing the sticker after the last successful detection
+const GRACE_MS = 1000; // how long to keep showing the sticker after the last successful detection
 
 function positionSticker() {
 
@@ -647,7 +624,7 @@ function positionSticker() {
         smoothedBox.height += (target.height - smoothedBox.height) * SMOOTHING;
     }
 
-    // Scale using the media's own aspect ratio (not the detection box's
+    // Scale using the image's own aspect ratio (not the detection box's
     // ratio) so it doesn't stretch/squish - only its size changes.
     const height = smoothedBox.height * stickerScale;
     const width = height * stickerAspect;

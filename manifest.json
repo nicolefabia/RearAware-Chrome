@@ -20,10 +20,14 @@
     "128": "icons/ra128.png"
   },
 
+  "background": {
+    "service_worker": "src/background/background.js",
+    "type": "module"
+  },
+
   "permissions": [
     "storage",
-    "activeTab",
-    "tabs"
+    "offscreen"
   ],
 
   "content_security_policy": {
@@ -34,11 +38,13 @@
     {
       "matches": [
         "https://meet.google.com/*",
-        "https://teams.microsoft.com/*"
+        "https://teams.microsoft.com/*",
+        "https://teams.live.com/*"
       ],
       "js": [
         "src/content/content.js"
-      ]
+      ],
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
